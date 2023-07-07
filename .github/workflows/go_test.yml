@@ -25,3 +25,6 @@ jobs:
 
     - name: Test
       uses: robherley/go-test-action@v0.1.0
+      with:
+        omitUntestedPackages: true
+        omitPie: true
