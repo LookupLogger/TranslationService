@@ -1,11 +1,11 @@
 package server
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestExtractSearchTerm(t *testing.T) {
@@ -13,14 +13,14 @@ func TestExtractSearchTerm(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"/", ""},
-		{"/ ", ""},
-		{"/  ", ""},
-		{"/   ", ""},
-		{"/hello", "hello"},
-		{"/hello world", "hello world"},
-		{"/言葉", "言葉"},
-		{"hello", ""},
+		{"/search/", ""},
+		{"/search/ ", ""},
+		{"/search/  ", ""},
+		{"/search/   ", ""},
+		{"/search/hello", "hello"},
+		{"/search/hello world", "hello world"},
+		{"/search/言葉", "言葉"},
+		{"/hello", ""},
 	}
 
 	for _, test := range tests {
@@ -31,20 +31,17 @@ func TestExtractSearchTerm(t *testing.T) {
 }
 
 func TestHandleValidRequest(t *testing.T) {
-	tests := []struct {
-		Path         string
-		ExpectedWord string
-	}{
-		{"/hello", "hello"},
-		{"/言葉", "言葉"},
-		{"/hello%20world", "hello world"},
+	tests := []string{
+		"/search/hello",
+		"/search/kotoba",
+		"/search/tatoeba",
 	}
 
 	var wg sync.WaitGroup
 	wg.Add(len(tests))
 
 	for _, test := range tests {
-		go func(path, expectedWord string) {
+		go func(path string) {
 			defer wg.Done()
 
 			handler := http.HandlerFunc(handleRequest)
@@ -60,24 +57,9 @@ func TestHandleValidRequest(t *testing.T) {
 
 			// Check the response status code
 			if rec.Code != http.StatusOK {
-				t.Errorf("expected status 200, got %d", rec.Code)
+				t.Errorf("path=%s. expected status 200, got %d", path, rec.Code)
 			}
-
-			// Decode the response body
-			var response map[string]string
-			err := json.NewDecoder(rec.Body).Decode(&response)
-			if err != nil {
-				t.Errorf("failed to decode response body: %v", err)
-			}
-
-			// Check the response content
-			expected := map[string]string{
-				"word": expectedWord,
-			}
-			if !compareMaps(response, expected) {
-				t.Errorf("expected response %v, got %v", expected, response)
-			}
-		}(test.Path, test.ExpectedWord)
+		}(test)
 	}
 
 	wg.Wait()
@@ -86,8 +68,11 @@ func TestHandleValidRequest(t *testing.T) {
 func TestHandleInvalidRequest(t *testing.T) {
 	tests := []string{
 		"/%20%20",
+		"/search/%20%20",
 		"/%20%20%20/%20/",
+		"/search/%20%20%20/%20/",
 		"/",
+		"/search/",
 	}
 
 	var wg sync.WaitGroup
@@ -113,6 +98,42 @@ func TestHandleInvalidRequest(t *testing.T) {
 				t.Errorf("expected status 400, got %d", rec.Code)
 			}
 		}(test)
+	}
+
+	wg.Wait()
+}
+
+func TestQueryJisho(t *testing.T) {
+	tests := []struct {
+		Word     string
+		Expected string
+	}{
+		{"tatoeba", "{\"meta\":{\"status\":200},\"data\":[{\"slug\":\"例えば\",\"is_common\":true,\"tags\":[\"wanikani14\"],\"jlpt\":[\"jlpt-n4\"],\"japanese\":[{\"word\":\"例えば\",\"reading\":\"たとえば\"}],\"senses\":[{\"english_definitions\":[\"for example\",\"for instance\",\"e.g.\"],\"parts_of_speech\":[\"Adverb (fukushi)\"],\"links\":[],\"tags\":[],\"restrictions\":[],\"see_also\":[],\"antonyms\":[],\"source\":[],\"info\":[]}],\"attribution\":{\"jmdict\":true,\"jmnedict\":false,\"dbpedia\":false}},{\"slug\":\"譬え話\",\"is_common\":false,\"tags\":[],\"jlpt\":[],\"japanese\":[{\"word\":\"たとえ話\",\"reading\":\"たとえばなし\"},{\"word\":\"例え話\",\"reading\":\"たとえばなし\"},{\"word\":\"譬え話\",\"reading\":\"たとえばなし\"},{\"word\":\"譬話\",\"reading\":\"たとえばなし\"}],\"senses\":[{\"english_definitions\":[\"allegory\",\"fable\",\"parable\"],\"parts_of_speech\":[\"Noun\"],\"links\":[],\"tags\":[],\"restrictions\":[],\"see_also\":[],\"antonyms\":[],\"source\":[],\"info\":[]},{\"english_definitions\":[\"Parable\"],\"parts_of_speech\":[\"Wikipedia definition\"],\"links\":[{\"text\":\"Read “Parable” on English Wikipedia\",\"url\":\"http://en.wikipedia.org/wiki/Parable?oldid=495216000\"},{\"text\":\"Read “たとえ話” on Japanese Wikipedia\",\"url\":\"http://ja.wikipedia.org/wiki/たとえ話?oldid=41347360\"}],\"tags\":[],\"restrictions\":[],\"see_also\":[],\"antonyms\":[],\"source\":[],\"info\":[],\"sentences\":[]}],\"attribution\":{\"jmdict\":true,\"jmnedict\":false,\"dbpedia\":\"http://dbpedia.org/resource/Parable\"}},{\"slug\":\"518697a3d5dda7b2c604bfe0\",\"tags\":[],\"jlpt\":[],\"japanese\":[{\"reading\":\"たとえばこんなラヴ・ソング\"}],\"senses\":[{\"english_definitions\":[\"Tatoeba Konna Love Song\"],\"parts_of_speech\":[\"Wikipedia definition\"],\"links\":[{\"text\":\"Read “Tatoeba Konna Love Song” on English Wikipedia\",\"url\":\"http://en.wikipedia.org/wiki/Tatoeba_Konna_Love_Song?oldid=484839140\"},{\"text\":\"Read “たとえばこんなラヴ・ソング” on Japanese Wikipedia\",\"url\":\"http://ja.wikipedia.org/wiki/たとえばこんなラヴ・ソング?oldid=42405209\"}],\"tags\":[],\"restrictions\":[],\"see_also\":[],\"antonyms\":[],\"source\":[],\"info\":[],\"sentences\":[]}],\"attribution\":{\"jmdict\":false,\"jmnedict\":false,\"dbpedia\":\"http://dbpedia.org/resource/Tatoeba_Konna_Love_Song\"}}]}"},
+	}
+
+	go func() {
+		s := NewServer()
+		s.Start()
+	}()
+
+	time.Sleep(1 * time.Second)
+
+	var wg sync.WaitGroup
+	wg.Add(len(tests))
+
+	for _, test := range tests {
+		go func(word, expected string) {
+			defer wg.Done()
+
+			result, err := queryJisho(word)
+			if err != nil {
+				t.Errorf("failed to query jisho: %v", err)
+			}
+
+			if result != expected {
+				t.Errorf("expected %s, got %s", expected, result)
+			}
+		}(test.Word, test.Expected)
 	}
 
 	wg.Wait()

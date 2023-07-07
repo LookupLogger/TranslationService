@@ -1,9 +1,9 @@
 package server
 
 import (
-	"encoding/json"
+	"fmt"
+	"io/ioutil"
 	"net/http"
-	"strings"
 )
 
 type Server struct {
@@ -14,28 +14,51 @@ func NewServer() *Server {
 }
 
 func (s *Server) Start() {
-	http.HandleFunc("/", handleRequest)
+	http.HandleFunc("/search/", handleRequest)
 	http.ListenAndServe(":8080", nil)
 }
 
+func (s *Server) Stop() {
+}
+
 func handleRequest(w http.ResponseWriter, r *http.Request) {
-	word := extractSearchTerm(r.URL.Path)
-	if word == "" {
+	query := extractSearchTerm(r.URL.Path)
+
+	if query == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{
-		"word": word,
-	})
-}
-
-// extractSearchTerm extracts the search term from the URL path. eg. /hello -> hello
-func extractSearchTerm(path string) string {
-	parts := strings.Split(path, "/")
-	if len(parts) < 2 {
-		return ""
+	jishoResponse, err := queryJisho(query)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
 	}
 
-	return strings.TrimSpace(parts[1])
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(jishoResponse))
+}
+
+func queryJisho(word string) (string, error) {
+	JISHO_URL := "https://jisho.org/api/v1/search/words?keyword=%s"
+	url := fmt.Sprintf(JISHO_URL, word)
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	// if the response is not 200, return an error
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("error: %s", resp.Status)
+	}
+
+	// now we can just convert the response body to a string
+	bodyBytes, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	return string(bodyBytes), nil
 }
