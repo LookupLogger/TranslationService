@@ -37,5 +37,5 @@ func extractSearchTerm(path string) string {
 		return ""
 	}
 
-	return parts[1]
+	return strings.TrimSpace(parts[1])
 }
